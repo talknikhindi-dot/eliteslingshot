@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elite Slingshot - Pro Edition</title>
+    <style>
+        :root { --wood: #5d4037; --rubber: #ff4444; --cyan: #00d2ff; }
+        body { margin: 0; background: #000; color: white; font-family: 'Arial', sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; user-select: none; }
+        
+        .hud { margin-top: 20px; display: flex; gap: 30px; z-index: 100; }
+        .stat { background: rgba(255,255,255,0.05); padding: 15px 30px; border-radius: 12px; border: 1px solid var(--cyan); text-align: center; }
+        .stat div { font-size: 10px; text-transform: uppercase; color: var(--cyan); }
+        .stat span { font-size: 24px; font-weight: bold; }
+
+        #arena { position: relative; width: 100vw; height: 85vh; cursor: crosshair; overflow: hidden; }
+
+        .slingshot-container { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 100px; height: 150px; }
+        
+        .fork { position: absolute; bottom: 0; left: 44px; width: 12px; height: 80px; background: var(--wood); border-radius: 5px; z-index: 5; }
+        .fork::before, .fork::after { content: ''; position: absolute; top: -40px; width: 12px; height: 60px; background: var(--wood); border-radius: 5px; }
+        .fork::before { left: -25px; transform: rotate(-30deg); }
+        .fork::after { right: -25px; transform: rotate(30deg); }
+
+        .rubber { 
+            position: absolute; 
+            background: var(--rubber); 
+            width: 6px; 
+            height: 0; 
+            transform-origin: top center; 
+            z-index: 4; 
+            box-shadow: 0 0 5px rgba(255, 68, 68, 0.5);
+        }
+        #rubber-left { top: 15px; left: 22px; }
+        #rubber-right { top: 15px; right: 22px; }
+
+        .shelf { display: flex; justify-content: center; gap: 40px; margin-top: 100px; }
+        .bottle { width: 45px; height: 130px; background: linear-gradient(180deg, var(--cyan), #2575fc); border-radius: 8px 8px 15px 15px; position: relative; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+        
+        .shatter { animation: burst 0.4s forwards; pointer-events: none; }
+        @keyframes burst { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2.5) rotate(15deg); opacity: 0; filter: blur(5px); } }
+        
+        .stone { position: absolute; width: 22px; height: 22px; background: radial-gradient(circle at 30% 30%, #999, #111); border-radius: 50%; z-index: 1000; box-shadow: 0 0 10px #fff; }
+
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; cursor: pointer; text-align: center; }
+        .overlay h1 { font-size: 48px; color: var(--cyan); margin-bottom: 10px; }
+        .overlay p { font-size: 18px; color: #ccc; margin-bottom: 30px; }
+        .btn-start { padding: 15px 50px; font-size: 20px; background: var(--cyan); color: #000; border: none; border-radius: 50px; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.3s; }
+        .btn-start:hover { transform: scale(1.1); box-shadow: 0 0 20px var(--cyan); }
+    </style>
+</head>
+<body onmousedown="startStretch(event)" onmousemove="updateStretch(event)" onmouseup="fireStone(event)">
+
+    <div id="start-overlay" class="overlay">
+        <h1>ELITE SLINGSHOT</h1>
+        <p>Aim and break the bottles!</p>
+        <button class="btn-start" onclick="startGame()">Start Game</button>
+    </div>
+
+    <div class="hud">
+        <div class="stat"><div>Score</div><span id="score">0</span></div>
+        <div class="stat"><div>Shots</div><span id="shots">0</span></div>
+    </div>
+
+    <div id="arena">
+        <div class="shelf" id="shelf"></div>
+        
+        <div class="slingshot-container" id="slingshot">
+            <div id="rubber-left" class="rubber"></div>
+            <div id="rubber-right" class="rubber"></div>
+            <div class="fork"></div>
+        </div>
+    </div>
+
+    <audio id="bg-music" loop src="https://www.soundjay.com/free-music/sounds/iron-man-01.mp3"></audio>
+    <audio id="snd-break" src="https://www.soundjay.com/misc/sounds/glass-break-1.mp3"></audio>
+    <audio id="snd-shot" src="https://www.soundjay.com/button/sounds/button-20.mp3"></audio>
+
+    <script>
+        const rubberL = document.getElementById('rubber-left');
+        const rubberR = document.getElementById('rubber-right');
+        const shelf = document.getElementById('shelf');
+        const bgMusic = document.getElementById('bg-music');
+        const sndBreak = document.getElementById('snd-break');
+        const sndShot = document.getElementById('snd-shot');
+
+        let isPulling = false;
+        let score = 0, shots = 0;
+
+        function startGame() {
+            document.getElementById('start-overlay').style.display = 'none';
+            bgMusic.volume = 0.2;
+            bgMusic.play().catch(() => {});
+            initBottles();
+        }
+
+        function initBottles() {
+            shelf.innerHTML = '';
+            for(let i=0; i<6; i++) {
+                let b = document.createElement('div');
+                b.className = 'bottle';
+                shelf.appendChild(b);
+            }
+        }
+
+        function startStretch(e) { isPulling = true; }
+
+        function updateStretch(e) {
+            if (!isPulling) return;
+
+            const sling = document.getElementById('slingshot').getBoundingClientRect();
+            const centerX = sling.left + sling.width / 2;
+            const centerY = sling.top + 20;
+
+            const dx = e.clientX - centerX;
+            const dy = e.clientY - centerY;
+            
+            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 120);
+            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+            [rubberL, rubberR].forEach(r => {
+                r.style.height = dist + "px";
+                r.style.transform = `rotate(${angle - 90}deg)`;
+            });
+        }
+
+        function fireStone(e) {
+            if (!isPulling) return;
+            isPulling = false;
+
+            rubberL.style.height = "0";
+            rubberR.style.height = "0";
+
+            shots++;
+            document.getElementById('shots').innerText = shots;
+
+            sndShot.currentTime = 0;
+            sndShot.play();
+
+            const stone = document.createElement('div');
+            stone.className = 'stone';
+            stone.style.left = '50%';
+            stone.style.bottom = '120px';
+            document.body.appendChild(stone);
+
+            const tx = e.clientX, ty = e.clientY;
+            const anim = stone.animate([
+                { bottom: '120px', left: '50%', transform: 'scale(1.2)' },
+                { top: ty + 'px', left: tx + 'px', transform: 'scale(0.3)' }
+            ], { duration: 250, easing: 'ease-out' });
+
+            anim.onfinish = () => {
+                checkHit(tx, ty);
+                stone.remove();
+            };
+        }
+
+        function checkHit(x, y) {
+            const bottles = document.querySelectorAll('.bottle');
+            bottles.forEach(b => {
+                const r = b.getBoundingClientRect();
+                if(x > r.left && x < r.right && y > r.top && y < r.bottom && !b.classList.contains('shatter')) {
+                    b.classList.add('shatter');
+                    score++;
+                    document.getElementById('score').innerText = score;
+                    sndBreak.currentTime = 0;
+                    sndBreak.play();
+                }
+            });
+            if(document.querySelectorAll('.shatter').length === 6) {
+                setTimeout(initBottles, 1000);
+            }
+        }
+    </script>
+</body>
+</html>
